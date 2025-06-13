@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from ollama import Client
 
 def init_client():
@@ -22,7 +26,7 @@ def load_interface():
     st.sidebar.markdown(
         """
         <style>
-        [data-testid="stSidebar"] > div { background-color: #d4d5d9; color: black; }
+        [data-testid=\"stSidebar\"] > div { background-color: #d4d5d9; color: black; }
         </style>
         """,
         unsafe_allow_html=True
@@ -93,7 +97,7 @@ def main():
             st.error("❌ Cliente Ollama no disponible")
             return
         if df is None or df_dict is None or df_examples is None:
-            st.warning("⚠️ Asegúrese de cargar 'df', 'df_dict' y 'df_examples' antes de enviar")
+            st.warning("⚠️ Asegúrate de cargar 'df', 'df_dict' y 'df_examples' antes de enviar")
             return
         if not user_query.strip():
             st.warning("⚠️ Escriba su consulta antes de enviar")
@@ -113,12 +117,13 @@ def main():
                 "10. El código debe terminar imprimiendo o mostrando el resultado final.\n"
                 "11. Si trabajas con fechas, SIEMPRE usa dayfirst=True al convertir: pd.to_datetime(df['fecha'], dayfirst=True)\n"
                 "12. Al procesar fechas, asume formato europeo (día/mes/año) a menos que se indique lo contrario.\n"
-                "13. NUNCA uses Series de pandas directamente en condicionales como 'if df['columna']:', usa métodos específicos como .any(), .all(), .empty, o compara con valores específicos.\n"
+                "13. NUNCA uses Series de pandas directamente en condicionales como 'if df['columna']:', usa métodos específicos como .any(), .all(), .empty o compara con valores específicos.\n"
                 "14. Si necesitas comprobar valores en una Serie, usa operadores de comparación explícitos: df['columna'] == valor, df['columna'] > valor, etc.\n"
                 "15. SIEMPRE devuelve los resultados como DataFrames o Series de pandas en lugar de imprimir texto.\n"
-                "16. Si usas scikit-learn y específicamente OneHotEncoder, usa pd.get_dummies() si no estás seguro de la versión.\n"
+                "16. Para regresión, usa `LinearRegression` en lugar de `LogisticRegression`, e incluye validación con `train_test_split`.\n"
                 "17. Si requieres más contexto, pregúntalo antes de generar el código de Python.\n"
                 "18. Si tienes sugerencias para mejorar el prompt, hazlas.\n"
+                "19. Asegúrate de generar el código completo y sin truncarlo en ninguna parte.\n"
             )
             system_prompt = (
                 "Genere solo código Python ejecutable usando el DataFrame 'df'. "
@@ -152,16 +157,36 @@ def main():
                 if plt.get_fignums():
                     st.pyplot(plt.gcf())
                     plt.clf()
-                if output:
-                    st.text(output)
+                if 'coefs' in local_vars and isinstance(local_vars['coefs'], (pd.DataFrame, pd.Series)):
+                    coefs = local_vars['coefs']
+                    st.subheader("Tabla de coeficientes")
+                    st.markdown(coefs.to_markdown(), unsafe_allow_html=True)
+                    if 'model' in local_vars and hasattr(local_vars['model'], 'intercept_'):
+                        intercept = local_vars['model'].intercept_
+                        intercept_df = pd.DataFrame({'Intercepto': intercept})
+                        st.markdown(intercept_df.to_markdown(), unsafe_allow_html=True)
+                elif 'r2' in local_vars and 'mae' in local_vars and 'mse' in local_vars:
+                    metrics_df = pd.DataFrame({
+                        'R2': [local_vars['r2']],
+                        'MAE': [local_vars['mae']],
+                        'MSE': [local_vars['mse']]
+                    })
+                    st.subheader("Métricas de desempeño")
+                    st.markdown(metrics_df.to_markdown(), unsafe_allow_html=True)
+                elif output:
+                    st.markdown(output.replace('\n', '  \n'), unsafe_allow_html=True)
                 elif "result" in local_vars:
-                    st.write(local_vars["result"])
-                elif not output and not plt.get_fignums():
-                    st.write(local_vars)
-            except Exception as e:
-                st.error(f"❌ Error al ejecutar el código: {e}")
-        except Exception as e:
-            st.error(f"❌ Error al generar el código: {e}")
+                    result = local_vars['result']
+                    if isinstance(result, (pd.DataFrame, pd.Series)):
+                        st.markdown(result.to_markdown(), unsafe_allow_html=True)
+                    else:
+                        st.markdown(str(result))
+                else:
+                    st.markdown(str(local_vars))
+            except Exception as exec_e:
+                st.error(f"❌ Error al ejecutar el código: {exec_e}")
+        except Exception as gen_e:
+            st.error(f"❌ Error al generar el código: {gen_e}")
 
 if __name__ == "__main__":
     main()
