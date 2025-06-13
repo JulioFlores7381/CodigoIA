@@ -2,19 +2,20 @@ import streamlit as st
 import pandas as pd
 from ollama import Client
 
-# 1. Inicializar cliente Ollama en puerto 11435
+# 1. Inicializar cliente Ollama en puerto 11435 no en el 11434
 def init_client():
     try:
         client = Client(host="http://localhost:11435")
         client.list()
+        st.sidebar.success("✅ Conexión con Ollama (puerto 11435) establecida")
     except Exception as e:
+        st.sidebar.error(f"❌ No se pudo conectar con Ollama: {e}")
         client = None
     return client
 
 # 2. Configuración de interfaz: carga de archivos y parámetros en expanders
 def load_interface():
     st.set_page_config(page_title="Análisis de información con IA", layout="wide")
-    inject_css()
 
     with st.sidebar.expander("Archivos de datos", expanded=True):
         datos_file = st.file_uploader("Datos (CSV)", type="csv", key="datos")
@@ -39,6 +40,7 @@ def load_interface():
 # 3. Lectura y validación de los tres archivos
 def load_data(datos_file, dict_file, ejemplos_file):
     df = df_dict = df_examples = None
+    # Carga de archivos
     if datos_file:
         try:
             df = pd.read_csv(datos_file)
@@ -58,18 +60,20 @@ def load_data(datos_file, dict_file, ejemplos_file):
         except Exception as e:
             st.sidebar.error(f"❌ Error cargando Ejemplos: {e}")
 
+    # Mensaje completo
     if df is not None and df_dict is not None and df_examples is not None:
         st.sidebar.success("ℹ️ Información cargada completamente")
 
     # Previews en expanders
     if df is not None:
-        with st.expander("Vista previa de 'df'", expanded=False):
+        with st.expander("Vista previa de datos", expanded=False):
             st.dataframe(df)
-    if df_examples is not None:
-        with st.expander("Vista previa de 'df_examples'", expanded=False):
-            st.dataframe(df_examples)
+    #if df_examples is not None:
+    #    with st.expander("Vista previa de 'df_examples'", expanded=False):
+    #        st.dataframe(df_examples)
     if df_dict is not None:
         with st.expander("Diccionario de datos", expanded=False):
+            # Mostrar tabla completa con ancho para 5 columnas
             width = min(len(df_dict.columns), 5) * 200
             st.dataframe(df_dict, width=width)
 
@@ -89,13 +93,6 @@ def build_prompt(user_query: str, df: pd.DataFrame, df_dict: pd.DataFrame, df_ex
 def main():
     datos_file, dict_file, ejemplos_file, model, temperature, max_tokens = load_interface()
     client = init_client()
-
-    # Mensaje de conexión visible en panel principal
-    if client is not None:
-        st.success("✅ Conexión con Ollama (puerto 11435) establecida")
-    else:
-        st.error("❌ No se pudo conectar con Ollama (puerto 11435)")
-
     df, df_dict, df_examples = load_data(datos_file, dict_file, ejemplos_file)
 
     st.subheader("Consulta al LLM")
