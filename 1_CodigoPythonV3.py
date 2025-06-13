@@ -149,11 +149,14 @@ def main():
                 exec(code, {}, local_vars)
                 sys.stdout = sys_stdout
                 output = buf.getvalue()
+                if plt.get_fignums():
+                    st.pyplot(plt.gcf())
+                    plt.clf()
                 if output:
                     st.text(output)
                 elif "result" in local_vars:
                     st.write(local_vars["result"])
-                else:
+                elif not output and not plt.get_fignums():
                     st.write(local_vars)
             except Exception as e:
                 st.error(f"❌ Error al ejecutar el código: {e}")
