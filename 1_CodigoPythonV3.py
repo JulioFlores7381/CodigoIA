@@ -2,20 +2,41 @@ import streamlit as st
 import pandas as pd
 from ollama import Client
 
-# 1. Inicializar cliente Ollama en puerto 11435 no en el 11434
+# 1. Inicializar cliente Ollama en puerto 11435
 def init_client():
     try:
         client = Client(host="http://localhost:11435")
         client.list()
-        st.sidebar.success("✅ Conexión con Ollama (puerto 11435) establecida")
-    except Exception as e:
-        st.sidebar.error(f"❌ No se pudo conectar con Ollama: {e}")
+    except Exception:
         client = None
     return client
 
-# 2. Configuración de interfaz: carga de archivos y parámetros en expanders
+# 2. Configuración de interfaz: logo, carga de archivos y parámetros
 def load_interface():
     st.set_page_config(page_title="Análisis de información con IA", layout="wide")
+
+    # Mostrar logo centrado en la parte superior del sidebar
+    try:
+        st.sidebar.image(
+            r"D:/Julio/ExperienciaAnalitica/IA/EASinFondo.png",
+            use_container_width=False,
+            width=250,
+        )
+    except Exception as e:
+        st.sidebar.error(f"❌ No se pudo cargar la imagen de logo: {e}")
+
+    # Cambiar fondo del sidebar a rojo y texto blanco
+    st.sidebar.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] > div {
+            background-color: #d4d5d9;
+            color: black;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
     with st.sidebar.expander("Archivos de datos", expanded=True):
         datos_file = st.file_uploader("Datos (CSV)", type="csv", key="datos")
@@ -40,7 +61,6 @@ def load_interface():
 # 3. Lectura y validación de los tres archivos
 def load_data(datos_file, dict_file, ejemplos_file):
     df = df_dict = df_examples = None
-    # Carga de archivos
     if datos_file:
         try:
             df = pd.read_csv(datos_file)
@@ -60,20 +80,15 @@ def load_data(datos_file, dict_file, ejemplos_file):
         except Exception as e:
             st.sidebar.error(f"❌ Error cargando Ejemplos: {e}")
 
-    # Mensaje completo
     if df is not None and df_dict is not None and df_examples is not None:
         st.sidebar.success("ℹ️ Información cargada completamente")
 
     # Previews en expanders
     if df is not None:
         with st.expander("Vista previa de datos", expanded=False):
-            st.dataframe(df)
-    #if df_examples is not None:
-    #    with st.expander("Vista previa de 'df_examples'", expanded=False):
-    #        st.dataframe(df_examples)
+            st.dataframe(df.head(5))
     if df_dict is not None:
         with st.expander("Diccionario de datos", expanded=False):
-            # Mostrar tabla completa con ancho para 5 columnas
             width = min(len(df_dict.columns), 5) * 200
             st.dataframe(df_dict, width=width)
 
@@ -93,13 +108,20 @@ def build_prompt(user_query: str, df: pd.DataFrame, df_dict: pd.DataFrame, df_ex
 def main():
     datos_file, dict_file, ejemplos_file, model, temperature, max_tokens = load_interface()
     client = init_client()
+
+    # Mensaje de conexión visible en panel principal
+    if client:
+        st.success("✅ Conexión con Ollama (puerto 11435) establecida")
+    else:
+        st.error("❌ No se pudo conectar con Ollama (puerto 11435)")
+
     df, df_dict, df_examples = load_data(datos_file, dict_file, ejemplos_file)
 
     st.subheader("Consulta al LLM")
     user_query = st.text_area("Escriba su consulta aquí:", height=200)
 
     if st.button("🚀 Enviar consulta"):
-        if client is None:
+        if not client:
             st.error("❌ Cliente Ollama no disponible")
             return
         if df is None or df_dict is None or df_examples is None:
