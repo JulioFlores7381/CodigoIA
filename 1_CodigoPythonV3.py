@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from ollama import Client
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-from ollama import Client
 
 def init_client():
     try:
@@ -35,158 +35,131 @@ def load_interface():
         datos_file = st.file_uploader("Datos (CSV)", type="csv", key="datos")
         dict_file = st.file_uploader("Diccionario (CSV)", type="csv", key="diccionario")
         ejemplos_file = st.file_uploader("Ejemplos (XLSX)", type="xlsx", key="ejemplos")
+    mode = st.sidebar.selectbox("Modo de operación", ["Consulta general", "Generación de código"] )
     with st.sidebar.expander("Configuración del modelo", expanded=False):
-        model_options = ["deepseek-coder-v2:16b", "deepseek-r1:7b", "codellama", "qwen3:8b", "llama3", "starcoder2:15b"]
-        model = st.selectbox("Modelo Ollama", options=model_options, index=0)
+        if mode == "Consulta general":
+            model_options = ["llama3", "qwen3:8b", "deepseek-r1:7b"]
+        else:
+            model_options = ["deepseek-coder-v2:16b", "codellama", "starcoder2:15b"]
+        model = st.selectbox("Modelo Ollama", model_options)
         temperature = st.slider("Temperatura", 0.0, 1.0, 0.1)
         max_tokens = st.slider("Máximo de predicciones", 50, 1000, 200)
-    return datos_file, dict_file, ejemplos_file, model, temperature, max_tokens
+    return datos_file, dict_file, ejemplos_file, mode, model, temperature, max_tokens
 
 def load_data(datos_file, dict_file, ejemplos_file):
     df = df_dict = df_examples = None
     if datos_file:
         try:
             df = pd.read_csv(datos_file)
-            st.sidebar.success(f"✅ DataFrame 'df' cargado: {df.shape[0]} filas x {df.shape[1]} columnas")
+            st.sidebar.success(f"✅ DataFrame 'df' cargado: {df.shape[0]}x{df.shape[1]}")
         except Exception as e:
             st.sidebar.error(f"❌ Error cargando Datos: {e}")
     if dict_file:
         try:
             df_dict = pd.read_csv(dict_file)
-            st.sidebar.success(f"✅ DataFrame 'df_dict' cargado: {df_dict.shape[0]} filas x {df_dict.shape[1]} columnas")
+            st.sidebar.success(f"✅ DataFrame 'df_dict' cargado: {df_dict.shape[0]}x{df_dict.shape[1]}")
         except Exception as e:
             st.sidebar.error(f"❌ Error cargando Diccionario: {e}")
     if ejemplos_file:
         try:
             df_examples = pd.read_excel(ejemplos_file)
-            st.sidebar.success(f"✅ DataFrame 'df_examples' cargado: {df_examples.shape[0]} filas x {df_examples.shape[1]} columnas")
+            st.sidebar.success(f"✅ DataFrame 'df_examples' cargado: {df_examples.shape[0]}x{df_examples.shape[1]}")
         except Exception as e:
             st.sidebar.error(f"❌ Error cargando Ejemplos: {e}")
-    if df is not None and df_dict is not None and df_examples is not None:
-        st.sidebar.success("ℹ️ Información cargada completamente")
-    if df is not None:
-        with st.expander("Vista previa de datos", expanded=False):
-            st.dataframe(df.head(5))
-    if df_dict is not None:
-        with st.expander("Diccionario de datos", expanded=False):
-            width = min(len(df_dict.columns), 5) * 200
-            st.dataframe(df_dict, width=width)
     return df, df_dict, df_examples
 
-def build_prompt(user_query: str, df: pd.DataFrame, df_dict: pd.DataFrame, df_examples: pd.DataFrame) -> str:
-    summary = (
-        "# Resumen de DataFrame 'df'\n"
-        f"Filas: {df.shape[0]}, Columnas: {df.shape[1]}\n"
-        f"Columnas: {', '.join(df.columns)}\n\n"
-        "# DataFrame 'df_dict' (diccionario) y 'df_examples' (ejemplos) disponibles para referencia.\n\n"
-    )
-    return summary + user_query
-
 def main():
-    datos_file, dict_file, ejemplos_file, model, temperature, max_tokens = load_interface()
+    datos_file, dict_file, ejemplos_file, mode, model, temperature, max_tokens = load_interface()
     client = init_client()
-    if client:
-        st.success("✅ Conexión con Ollama (puerto 11435) establecida")
-    else:
-        st.error("❌ No se pudo conectar con Ollama (puerto 11435)")
+    if not client:
+        st.error("❌ No se pudo conectar con Ollama")
+        return
+    st.success("✅ Conexión con Ollama establecida")
     df, df_dict, df_examples = load_data(datos_file, dict_file, ejemplos_file)
     st.subheader("Consulta al LLM")
     user_query = st.text_area("Escriba su consulta aquí:", height=200)
-    if st.button("🚀 Enviar consulta"):
-        if not client:
-            st.error("❌ Cliente Ollama no disponible")
+    if not st.button("🚀 Enviar consulta"):
+        return
+    if mode == "Consulta general":
+        if df is None or df_dict is None:
+            st.warning("⚠️ Cargue 'df' y 'df_dict' para este modo")
             return
+        summary = f"DataFrame 'df': {df.shape[0]} filas, {df.shape[1]} columnas. Columnas: {', '.join(df.columns)}\n"
+        summary += f"Diccionario 'df_dict' columnas: {', '.join(df_dict.columns)}\n\n"
+        prompt = summary + user_query
+        response = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Responde con texto, no generes código. Los datos están en 'df' y el diccionario en 'df_dict'."},
+                {"role": "user", "content": prompt}
+            ],
+            options={"temperature": temperature, "num_predict": max_tokens}
+        )
+        st.markdown(response.message.content)
+    else:
         if df is None or df_dict is None or df_examples is None:
-            st.warning("⚠️ Asegúrate de cargar 'df', 'df_dict' y 'df_examples' antes de enviar")
+            st.warning("⚠️ Cargue 'df', 'df_dict' y 'df_examples' para generación de código")
             return
-        if not user_query.strip():
-            st.warning("⚠️ Escriba su consulta antes de enviar")
-            return
-        prompt = build_prompt(user_query, df, df_dict, df_examples)
-        try:
-            instructions = (
-                "1. RESPONDE ÚNICAMENTE CON CÓDIGO PYTHON PURO, sin texto explicativo ni comentarios introductorios.\n"
-                "2. NO INCLUYAS frases como \"Aquí está el código\" o \"Para calcular...\".\n"
-                "3. El código debe empezar directamente con sintaxis Python válida (sin texto antes).\n"
-                "4. NO uses triple comillas, bloques markdown ni explicaciones antes o después del código.\n"
-                "5. Asume que el DataFrame YA está cargado como 'df', NO INTENTES cargarlo de nuevo.\n"
-                "6. Asegúrate de que el código tenga una indentación correcta y consistente.\n"
-                "7. Usa 4 espacios para la indentación, no tabulaciones.\n"
-                "8. Si necesitas generar visualizaciones, usa matplotlib o seaborn (ya importados como plt y sns).\n"
-                "9. NO ALUCINES: solo usa las columnas y datos que existen realmente en el DataFrame.\n"
-                "10. El código debe terminar imprimiendo o mostrando el resultado final.\n"
-                "11. Si trabajas con fechas, SIEMPRE usa dayfirst=True al convertir: pd.to_datetime(df['fecha'], dayfirst=True)\n"
-                "12. Al procesar fechas, asume formato europeo (día/mes/año) a menos que se indique lo contrario.\n"
-                "13. NUNCA uses Series de pandas directamente en condicionales como 'if df['columna']:', usa métodos específicos como .any(), .all(), .empty o compara con valores específicos.\n"
-                "14. Si necesitas comprobar valores en una Serie, usa operadores de comparación explícitos: df['columna'] == valor, df['columna'] > valor, etc.\n"
-                "15. SIEMPRE devuelve los resultados como DataFrames o Series de pandas en lugar de imprimir texto.\n"
-                "16. Para regresión, usa `LinearRegression` en lugar de `LogisticRegression`, e incluye validación con `train_test_split`.\n"
-                "17. Si requieres más contexto, pregúntalo antes de generar el código de Python.\n"
-                "18. Si tienes sugerencias para mejorar el prompt, hazlas.\n"
-                "19. Asegúrate de generar el código completo y sin truncarlo en ninguna parte.\n"
-            )
-            system_prompt = (
-                "Genere solo código Python ejecutable usando el DataFrame 'df'. "
-                "No incluya lecturas de archivos ni definiciones de 'df'. "
-                "Use 'df_dict' para mapear nombres de columnas y 'df_examples' para referencias de código.\n\n"
-                f"{instructions}"   
-            )
-            response = client.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                options={"temperature": temperature, "num_predict": max_tokens}
-            )
-            raw_content = response.message.content
-            clean_response = raw_content.lstrip()
-            code = clean_response.replace("```python", "").replace("```", "").strip()
-            st.subheader("Código generado por Ollama")
-            st.code(code, language="python")
-            st.subheader("Resultado de la ejecución")
-            try:
-                import io, sys
-                buf = io.StringIO()
-                sys_stdout = sys.stdout
-                sys.stdout = buf
-                local_vars = {"df": df, "df_dict": df_dict, "df_examples": df_examples, "pd": pd, "np": np, "plt": plt, "sns": sns}
-                exec(code, {}, local_vars)
-                sys.stdout = sys_stdout
-                output = buf.getvalue()
-                if plt.get_fignums():
-                    st.pyplot(plt.gcf())
-                    plt.clf()
-                if 'coefs' in local_vars and isinstance(local_vars['coefs'], (pd.DataFrame, pd.Series)):
-                    coefs = local_vars['coefs']
-                    st.subheader("Tabla de coeficientes")
-                    st.markdown(coefs.to_markdown(), unsafe_allow_html=True)
-                    if 'model' in local_vars and hasattr(local_vars['model'], 'intercept_'):
-                        intercept = local_vars['model'].intercept_
-                        intercept_df = pd.DataFrame({'Intercepto': intercept})
-                        st.markdown(intercept_df.to_markdown(), unsafe_allow_html=True)
-                elif 'r2' in local_vars and 'mae' in local_vars and 'mse' in local_vars:
-                    metrics_df = pd.DataFrame({
-                        'R2': [local_vars['r2']],
-                        'MAE': [local_vars['mae']],
-                        'MSE': [local_vars['mse']]
-                    })
-                    st.subheader("Métricas de desempeño")
-                    st.markdown(metrics_df.to_markdown(), unsafe_allow_html=True)
-                elif output:
-                    st.markdown(output.replace('\n', '  \n'), unsafe_allow_html=True)
-                elif "result" in local_vars:
-                    result = local_vars['result']
-                    if isinstance(result, (pd.DataFrame, pd.Series)):
-                        st.markdown(result.to_markdown(), unsafe_allow_html=True)
-                    else:
-                        st.markdown(str(result))
-                else:
-                    st.markdown(str(local_vars))
-            except Exception as exec_e:
-                st.error(f"❌ Error al ejecutar el código: {exec_e}")
-        except Exception as gen_e:
-            st.error(f"❌ Error al generar el código: {gen_e}")
+        summary = (
+            f"# Resumen de DataFrame 'df'\nFilas: {df.shape[0]}, Columnas: {df.shape[1]}\n"
+            f"Columnas: {', '.join(df.columns)}\n\n"
+            "# DataFrame 'df_dict' y 'df_examples' disponibles.\n\n"
+        )
+        prompt = summary + user_query
+        instructions = (
+            "1. RESPONDE ÚNICAMENTE CON CÓDIGO PYTHON PURO, sin texto explicativo ni comentarios introductorios."
+            "2. NO INCLUYAS frases como 'Aquí está el código' o 'Para calcular...'."
+            "3. El código debe empezar directamente con sintaxis Python válida (sin texto antes)."
+            "4. NO uses triple comillas, bloques markdown ni explicaciones antes o después del código."
+            "5. Asume que el DataFrame YA está cargado como 'df', NO INTENTES cargarlo de nuevo."
+            "6. Asegúrate de que el código tenga una indentación correcta y consistente."
+            "7. Usa 4 espacios para la indentación, no tabulaciones."
+            "8. Si necesitas generar visualizaciones, usa matplotlib o seaborn (ya importados como plt y sns)."
+            "9. NO ALUCINES: solo usa las columnas y datos que existen realmente en el DataFrame."
+            "10. El código debe terminar imprimiendo o mostrando el resultado final."
+            "11. Si trabajas con fechas, SIEMPRE usa dayfirst=True al convertir: pd.to_datetime(df['fecha'], dayfirst=True)"
+            "12. Al procesar fechas, asume formato europeo (día/mes/año) a menos que se indique lo contrario."
+            "13. NUNCA uses Series de pandas directamente en condicionales como 'if df['columna']:', usa métodos específicos como .any(), .all(), .empty o compara con valores específicos."
+            "14. Si necesitas comprobar valores en una Serie, usa operadores de comparación explícitos: df['columna'] == valor, df['columna'] > valor, etc."
+            "15. SIEMPRE devuelve los resultados como DataFrames o Series de pandas en lugar de imprimir texto."
+            "16. Para regresión, usa `LinearRegression` en lugar de `LogisticRegression`, e incluye validación con `train_test_split`."
+            "17. Si requieres más contexto, pregúntalo antes de generar el código de Python."
+            "18. Si tienes sugerencias para mejorar el prompt, hazlas."
+            "19. Asegúrate de generar el código completo y sin truncarlo en ninguna parte."
+        )
+        system_prompt = (
+            "Genere solo código Python ejecutable usando 'df'. Use 'df_dict' y 'df_examples' para referencia." + instructions
+        )
+        response = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            options={"temperature": temperature, "num_predict": max_tokens}
+        )
+        code = response.message.content.lstrip().replace("```python", "").replace("```", "").strip()
+        st.subheader("Código generado")
+        st.code(code, language="python")
+        st.subheader("Resultado de la ejecución")
+        import io, sys
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = buf
+        local_vars = {"df": df, "df_dict": df_dict, "df_examples": df_examples, "pd": pd, "np": np, "plt": plt, "sns": sns}
+        exec(code, {}, local_vars)
+        sys.stdout = old_stdout
+        if plt.get_fignums():
+            st.pyplot(plt.gcf()); plt.clf()
+        output = buf.getvalue()
+        if output:
+            st.markdown(output.replace("\n", "  \n"))
+        elif "result" in local_vars:
+            res = local_vars["result"]
+            if isinstance(res, (pd.DataFrame, pd.Series)):
+                st.dataframe(res)
+            else:
+                st.markdown(str(res))
 
 if __name__ == "__main__":
     main()
