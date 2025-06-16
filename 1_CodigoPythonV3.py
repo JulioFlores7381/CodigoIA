@@ -94,7 +94,7 @@ def main():
         respuesta = client.chat(
             model=model,
             messages=[
-                {"role": "system", "content": "Responde en lenguaje natural. No generes código. Usa únicamente las columnas existentes en 'df'."},
+                {"role": "system", "content": "Responde en lenguaje natural. No generes código. Usa únicamente las columnas existentes en 'df'. Sé concreto pero claro. Para cada propuesta de análisis, presenta la idea en forma de bullet e incluye una explicación concisa que la justifique."},
                 {"role": "user", "content": prompt_base}
             ],
             options={"temperature": temperature, "num_predict": max_tokens}
@@ -117,34 +117,35 @@ def main():
         st.markdown("### 2️⃣ Respuesta en lenguaje natural")
         st.write(st.session_state["respuesta"])
 
-        st.markdown("### 🧾 Estadísticas del DataFrame")
         if df is not None:
-            # Aplicar tipos categóricos según df_dict
-            if df_dict is not None and 'Variable' in df_dict.columns and 'Tipo' in df_dict.columns:
-                cat_vars = df_dict[df_dict['Tipo'].str.lower().isin(['categórica', 'categorica', 'category'])]['Variable'].values
-                for col in cat_vars:
-                    if col in df.columns:
-                        df[col] = df[col].astype('category')
+            with st.expander("### 🧾 Estadísticas del DataFrame", expanded=False):
+                # Aplicar tipos categóricos según df_dict
+                if df_dict is not None and 'Variable' in df_dict.columns and 'Tipo' in df_dict.columns:
+                    cat_vars = df_dict[df_dict['Tipo'].str.lower().isin(['categórica', 'categorica', 'category'])]['Variable'].values
+                    for col in cat_vars:
+                        if col in df.columns:
+                            df[col] = df[col].astype('category')
 
-            # Convertir automáticamente columnas con fechas en formato adecuado
-            for col in df.columns:
-                if df[col].dtype == object:
-                    try:
-                        df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
-                    except:
-                        pass
-            # Descripción numérica
-            desc = df.describe(include='all').transpose()
-            desc["Valores perdidos"] = df.isnull().sum()
-            desc["Valores atípicos"] = ((df.select_dtypes(include=[np.number]) > (df.select_dtypes(include=[np.number]).mean() + 3 * df.select_dtypes(include=[np.number]).std())) | (df.select_dtypes(include=[np.number]) < (df.select_dtypes(include=[np.number]).mean() - 3 * df.select_dtypes(include=[np.number]).std()))).sum()
-            st.dataframe(desc)
-            # Información categórica
-            with st.expander("#### 📊 Variables categóricas", expanded=False):
+                # Convertir automáticamente columnas con fechas en formato adecuado
+                for col in df.columns:
+                    if df[col].dtype == object:
+                        try:
+                            df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+                        except:
+                            pass
+                # Descripción numérica
+                desc = df.describe(include='all').transpose()
+                desc["Valores perdidos"] = df.isnull().sum()
+                desc["Valores atípicos"] = ((df.select_dtypes(include=[np.number]) > (df.select_dtypes(include=[np.number]).mean() + 3 * df.select_dtypes(include=[np.number]).std())) | (df.select_dtypes(include=[np.number]) < (df.select_dtypes(include=[np.number]).mean() - 3 * df.select_dtypes(include=[np.number]).std()))).sum()
+                st.dataframe(desc)
+                # Información categórica
+                # Panel simple sin nesting para variables categóricas
+                st.markdown("#### 📊 Variables categóricas")
                 cat_cols = df.select_dtypes(include=['object', 'category']).columns
-            for col in cat_cols:
-                st.markdown(f"**{col}**")
-                st.dataframe(df[col].value_counts(dropna=False).rename('Frecuencia').to_frame())
-                st.write("Valores perdidos:", df[col].isnull().sum())
+                for col in cat_cols:
+                    st.markdown(f"**{col}**")
+                    st.dataframe(df[col].value_counts(dropna=False).rename('Frecuencia').to_frame())
+                    st.write("Valores perdidos:", df[col].isnull().sum())
 
         nuevo_prompt = st.text_area("### 3️⃣ Prompt optimizado para código:", value=st.session_state["prompt_opt"], key="prompt_editable")
 
@@ -167,6 +168,19 @@ Si existe, usa la columna 'Valores' en 'df_dict' para identificar cómo deben re
 Ejemplo: si en df_dict la variable 'sexo' tiene como 'Valores' la cadena '0=Masculino,1=Femenino', debes usar ese mapeo al transformar la variable 'sexo'.
 NO HAGAS suposiciones como {'M': 0, 'F': 1} a menos que esté claramente definido en df_dict.
 
+PARA MODELOS CON COEFICIENTES:
+- SIEMPRE muestra los coeficientes con el nombre del campo correspondiente.
+- Usa pd.DataFrame para crear una tabla con columnas 'Variable' y 'Coeficiente'.
+- Para modelos de regresión lineal: pd.DataFrame({'Variable': X.columns, 'Coeficiente': modelo.coef_})
+- Para modelos logísticos: pd.DataFrame({'Variable': X.columns, 'Coeficiente': modelo.coef_[0]})
+- Incluye el intercepto si existe: agregar fila con 'Intercepto' y modelo.intercept_
+- Ordena por valor absoluto del coeficiente para mostrar las variables más importantes primero.
+
+PARA MODELOS PREDICTIVOS:
+- NO generes pronósticos automáticamente a menos que se solicite explícitamente.
+- Enfócate en mostrar las métricas del modelo (R², accuracy, etc.) y los coeficientes.
+- Solo incluye predicciones si el usuario específicamente pide "predecir", "pronosticar" o "hacer predicciones".
+- Muestra estadísticas de evaluación del modelo en lugar de predicciones por defecto.
 
 RESPONDE ÚNICAMENTE CON CÓDIGO PYTHON PURO, sin texto explicativo ni comentarios introductorios.
 2. NO INCLUYAS frases como 'Aquí está el código' o 'Para calcular...'.
@@ -227,6 +241,17 @@ RESPONDE ÚNICAMENTE CON CÓDIGO PYTHON PURO, sin texto explicativo ni comentari
                 "salida": st.session_state["salida"],
                 "timestamp": st.session_state["timestamp"]
             })
+
+            st.markdown("### 6️⃣ Interpretación de resultados")
+            interpretacion = client.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Eres un consultor de negocios explicando resultados de análisis de datos a ejecutivos sin conocimientos técnicos. Explica los resultados de manera clara y práctica, enfocándote en: 1) Qué significan los números para el negocio, 2) Cuáles son los factores más importantes, 3) Qué acciones se pueden tomar basándose en estos resultados. Usa un lenguaje sencillo, evita jerga técnica, y conecta siempre los hallazgos con implicaciones de negocio. Si hay coeficientes de modelo, explica cuáles variables tienen mayor impacto y en qué dirección."},
+                    {"role": "user", "content": st.session_state["salida"]}
+                ],
+                options={"temperature": temperature, "num_predict": max_tokens}
+            ).message.content
+            st.write(interpretacion)
 
             with st.expander("📜 Historial de ejecuciones"):
                 for h in reversed(st.session_state.historial):
