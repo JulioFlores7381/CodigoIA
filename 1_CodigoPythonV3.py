@@ -117,6 +117,35 @@ def main():
         st.markdown("### 2️⃣ Respuesta en lenguaje natural")
         st.write(st.session_state["respuesta"])
 
+        st.markdown("### 🧾 Estadísticas del DataFrame")
+        if df is not None:
+            # Aplicar tipos categóricos según df_dict
+            if df_dict is not None and 'Variable' in df_dict.columns and 'Tipo' in df_dict.columns:
+                cat_vars = df_dict[df_dict['Tipo'].str.lower().isin(['categórica', 'categorica', 'category'])]['Variable'].values
+                for col in cat_vars:
+                    if col in df.columns:
+                        df[col] = df[col].astype('category')
+
+            # Convertir automáticamente columnas con fechas en formato adecuado
+            for col in df.columns:
+                if df[col].dtype == object:
+                    try:
+                        df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+                    except:
+                        pass
+            # Descripción numérica
+            desc = df.describe(include='all').transpose()
+            desc["Valores perdidos"] = df.isnull().sum()
+            desc["Valores atípicos"] = ((df.select_dtypes(include=[np.number]) > (df.select_dtypes(include=[np.number]).mean() + 3 * df.select_dtypes(include=[np.number]).std())) | (df.select_dtypes(include=[np.number]) < (df.select_dtypes(include=[np.number]).mean() - 3 * df.select_dtypes(include=[np.number]).std()))).sum()
+            st.dataframe(desc)
+            # Información categórica
+            with st.expander("#### 📊 Variables categóricas", expanded=False):
+                cat_cols = df.select_dtypes(include=['object', 'category']).columns
+            for col in cat_cols:
+                st.markdown(f"**{col}**")
+                st.dataframe(df[col].value_counts(dropna=False).rename('Frecuencia').to_frame())
+                st.write("Valores perdidos:", df[col].isnull().sum())
+
         nuevo_prompt = st.text_area("### 3️⃣ Prompt optimizado para código:", value=st.session_state["prompt_opt"], key="prompt_editable")
 
         if st.button("▶ Ejecutar Prompt optimizado"):
